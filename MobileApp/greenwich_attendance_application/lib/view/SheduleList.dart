@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:greenwich_attendance_application/view/AttendanceStatusPage.dart';
 import 'package:http/http.dart' as http;
 import '../model/Slot.dart';
-import 'AddStudent.dart';
+import 'AddStudentList.dart';
 
 class ScheduleList extends StatelessWidget {
   const ScheduleList({super.key});

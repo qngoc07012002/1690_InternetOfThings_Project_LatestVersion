@@ -9,7 +9,8 @@ import 'package:http/http.dart' as http;
 
 import 'package:greenwich_attendance_application/model/Student.dart';
 
-import 'AddStudent.dart';
+import 'AddNewStudent.dart';
+import 'AddStudentList.dart';
 import 'EditProfile.dart';
 
 // class MyHttpOverrides extends HttpOverrides{
@@ -49,16 +50,19 @@ class _StudentList extends StatefulWidget {
 
 class _StudentListState extends State<_StudentList> {
   late Future<List<Student>> futureStudents;
+  bool hasNewStudent = false;
 
   @override
   void initState() {
     super.initState();
     futureStudents = fetchStudents();
+    checkNewStudent();
   }
 
   Future<void> _refreshStudents() async {
     setState(() {
       futureStudents = fetchStudents();
+      checkNewStudent();
     });
   }
 
@@ -129,21 +133,42 @@ class _StudentListState extends State<_StudentList> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) {
-                return const AddStudent();
-              },
-              transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: child,
-                );
-              },
-            ),
-          );
+        onPressed: () async {
+          if (hasNewStudent == false) {
+
+           String? rfid = await newStudentWaiting();
+            if (rfid != null){
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  pageBuilder: (context, animation, secondaryAnimation) {
+                    return AddNewStudent(rfid: rfid,);
+                  },
+                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                    return FadeTransition(
+                      opacity: animation,
+                      child: child,
+                    );
+                  },
+                ),
+              );
+            }
+          } else {
+            Navigator.push(
+              context,
+              PageRouteBuilder(
+                pageBuilder: (context, animation, secondaryAnimation) {
+                  return const AddStudent();
+                },
+                transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: child,
+                  );
+                },
+              ),
+            );
+          }
         },
         backgroundColor: const Color.fromRGBO(46, 29, 91, 1),
         child: const Icon(Icons.add),
@@ -166,6 +191,29 @@ class _StudentListState extends State<_StudentList> {
     } else {
       throw Exception('Failed to load Todo');
     }
+  }
+
+  Future<void> checkNewStudent() async {
+    final response = await http.get(Uri.parse('http://www.nqngoc.id.vn/get_HasNewStudent.php'));
+
+    if (response.statusCode == 200) {
+      final jsonData = json.decode(response.body);
+      setState(() {
+        hasNewStudent = jsonData as bool;
+      });
+    } else {
+      throw Exception('Failed to load data');
+    }
+  }
+
+  Future<String?> newStudentWaiting() async {
+    final response = await http.get(Uri.parse('http://www.nqngoc.id.vn/post_AddNewStudent_Waiting.php'));
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = json.decode(response.body);
+      return data['rfid'].toString();
+    }
+    return null;
   }
 }
 

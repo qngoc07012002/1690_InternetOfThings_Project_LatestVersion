@@ -1,12 +1,13 @@
 #include <Wire.h>
 #include <U8g2lib.h>
-#include <SPI.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
 #include <Adafruit_Fingerprint.h>
-
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include "WiFiManager.h" //https://github.com/tzapu/WiFiManager
 
 #if (defined(__AVR__) || defined(ESP8266)) && !defined(__AVR_ATmega2560__)
 SoftwareSerial mySerial(2, 3);
@@ -18,20 +19,24 @@ SoftwareSerial mySerial(2, 3);
 #define SS_PIN 2         
 #define BUZZER_PIN 15
 
-
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
 
-char ssid[] = "LINH HOMIE F3 A";        
-char password[] = "LINHHOMIEcamon"; 
+// char ssid[] = "LINH HOMIE F3 A";        
+// char password[] = "LINHHOMIEcamon"; 
 int COUNT_TIME = 0;
+
+void configModeCallback (WiFiManager *myWiFiManager)
+{
+  Serial.println("Entered config mode");
+  Serial.println(WiFi.softAPIP());
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+}
 
 void setup() {
   Serial.begin(115200);
   Wire.begin();
-  SPI.begin();
   finger.begin(57600);
-  WiFi.begin(ssid, password);
   u8g2.begin();
 
   delay(5);
@@ -41,22 +46,34 @@ void setup() {
     Serial.println("Did not find fingerprint sensor :(");
     while (1) { delay(1); }
   }
-
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB08_tr);
-  u8g2.setCursor(0, 0);
-  u8g2.print("Connecting to WiFi...");
-  u8g2.sendBuffer();
-
-  while (WiFi.status() != WL_CONNECTED) {
+  WiFiManager wifiManager;
+ 
+  wifiManager.setAPCallback(configModeCallback);
+  if (!wifiManager.autoConnect())
+  {
+    Serial.println("failed to connect and hit timeout");
+   
+    ESP.reset();
     delay(1000);
   }
+  
+  Serial.println("connected...");
 
-  u8g2.clearBuffer();
-  u8g2.print("Connected to WiFi!");
-  u8g2.sendBuffer();
+  // u8g2.clearBuffer();
+  // u8g2.setFont(u8g2_font_ncenB08_tr);
+  // u8g2.setCursor(0, 0);
+  // u8g2.print("Connecting to WiFi...");
+  // u8g2.sendBuffer();
 
-  delay(1000);
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   delay(1000);
+  // }
+
+  // u8g2.clearBuffer();
+  // u8g2.print("Connected to WiFi!");
+  // u8g2.sendBuffer();
+
+  // delay(1000);
 
   displayMainScreen();
 
@@ -67,30 +84,12 @@ void setup() {
 void loop() {
   COUNT_TIME++;
   postMarkAbsent();
+  checkAddStudent();
   getFinger();
-  if (COUNT_TIME == 50){
+  if (COUNT_TIME == 10){
     displayMainScreen();
     COUNT_TIME = 0;
   }
-  // if (COUNT_TIME == 50) {
-  //   displayMainScreen();
-  //   COUNT_TIME = 0;
-  // }
-
-  // if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
-  //   COUNT_TIME++;
-  //   delay(100);
-  //   return;
-  // } else COUNT_TIME = 0;
-
-  // std::string tagID = std::to_string(getFingerprintID());
- 
-
-  // postTakeAttendance(tagID.c_str());
-
-  // digitalWrite(BUZZER_PIN, HIGH);
-  // delay(300);
-  // digitalWrite(BUZZER_PIN, LOW);
 
   delay(300);
 }
@@ -107,7 +106,6 @@ void displayMainScreen() {
 }
 
 void getFinger() {
-  
   uint8_t p = finger.getImage();
 
   switch (p) {
@@ -173,7 +171,233 @@ void getFinger() {
   
 }
 
+void checkAddStudent(){
+  String url = "http://www.nqngoc.id.vn/get_CheckHasAddStudent.php";
+  WiFiClient client;
+  HTTPClient http;
+  String payload = "";
+  http.begin(client, url);
 
+  int httpResponseCode = http.GET();
+  if (httpResponseCode == HTTP_CODE_OK) {
+    payload = http.getString();
+  }
+  http.end();
+  StaticJsonDocument<192> doc;
+
+  DeserializationError error = deserializeJson(doc, payload);
+  
+   if (doc.containsKey("error")){
+    return;
+   } else {
+      const char* rfid = doc["rfid"];
+      int id =  atoi(rfid);
+      enrollNewFinger(id);
+   }
+}
+
+void enrollNewFinger(int id) {
+  while (true){
+    int p = -1;
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    u8g2.setCursor(5, 10);
+    u8g2.print("Put Your Finger In");
+    u8g2.sendBuffer();
+    while (p != FINGERPRINT_OK) {
+      p = finger.getImage();
+      switch (p) {
+      case FINGERPRINT_OK:
+        Serial.println("Image taken");
+        break;
+      case FINGERPRINT_NOFINGER:
+        Serial.println(".");
+        break;
+      case FINGERPRINT_PACKETRECIEVEERR:
+        Serial.println("Communication error");
+        break;
+      case FINGERPRINT_IMAGEFAIL:
+        Serial.println("Imaging error");
+        break;
+      default:
+        Serial.println("Unknown error");
+        break;
+        }
+    }
+    bool check = false;
+    p = finger.image2Tz(1);
+    switch (p) {
+      case FINGERPRINT_OK:
+        Serial.println("Image converted");
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(150);
+        digitalWrite(BUZZER_PIN, LOW);
+        u8g2.clearBuffer();
+        check = true;
+        break;
+      case FINGERPRINT_IMAGEMESS:
+        Serial.println("Image too messy");
+        check = false;
+        break;
+      case FINGERPRINT_PACKETRECIEVEERR:
+        Serial.println("Communication error");
+        check = false;
+        break;
+      case FINGERPRINT_FEATUREFAIL:
+        Serial.println("Could not find fingerprint features");
+        check = false;
+        break;
+      case FINGERPRINT_INVALIDIMAGE:
+        Serial.println("Could not find fingerprint features");
+        check = false;
+        break;
+      default:
+        Serial.println("Unknown error");
+        check = false;
+        break;
+    } 
+    if (check){
+      delay(2000);
+      p = 0;
+      while (p != FINGERPRINT_NOFINGER) {
+         p = finger.getImage();
+      }
+      u8g2.setFont(u8g2_font_ncenB08_tr);
+      u8g2.setCursor(5, 10);
+      u8g2.print("Put Your Finger Again");
+      u8g2.sendBuffer();
+      postNewStatusAddStudent("Again");
+      p = -1;
+      while (p != FINGERPRINT_OK) {
+        p = finger.getImage();
+        switch (p) {
+        case FINGERPRINT_OK:
+          Serial.println("Image taken");
+          break;
+        case FINGERPRINT_NOFINGER:
+          Serial.print(".");
+          break;
+        case FINGERPRINT_PACKETRECIEVEERR:
+          Serial.println("Communication error");
+          break;
+        case FINGERPRINT_IMAGEFAIL:
+          Serial.println("Imaging error");
+          break;
+        default:
+          Serial.println("Unknown error");
+          break;
+        }
+      }
+      check = false;
+      p = finger.image2Tz(2);
+      switch (p) {
+        case FINGERPRINT_OK:
+          Serial.println("Image converted");
+          check = true;
+          break;
+        case FINGERPRINT_IMAGEMESS:
+          Serial.println("Image too messy");
+          check = false;
+          break;
+        case FINGERPRINT_PACKETRECIEVEERR:
+          Serial.println("Communication error");
+          check = false;
+          break;
+        case FINGERPRINT_FEATUREFAIL:
+          Serial.println("Could not find fingerprint features");
+          check = false;
+          break;
+        case FINGERPRINT_INVALIDIMAGE:
+          Serial.println("Could not find fingerprint features");
+          check = false;
+          break;
+        default:
+          Serial.println("Unknown error");
+          check = false;
+          break;
+      } 
+      if (check) {
+        p = finger.createModel();
+        check = false;
+        if (p == FINGERPRINT_OK) {
+          Serial.println("Prints matched!");
+          check = true;
+        } else if (p == FINGERPRINT_PACKETRECIEVEERR) {
+          Serial.println("Communication error");
+          check = false;
+        } else if (p == FINGERPRINT_ENROLLMISMATCH) {
+          Serial.println("Fingerprints did not match");
+          check = false;
+        } else {
+          Serial.println("Unknown error");
+          check = false;
+        }
+        if (check){
+          p = finger.storeModel(id);
+          check = false;
+          if (p == FINGERPRINT_OK) {
+            Serial.println("Stored!");
+            check = true;
+          } else if (p == FINGERPRINT_PACKETRECIEVEERR) {
+            Serial.println("Communication error");
+            check = false;
+          } else if (p == FINGERPRINT_BADLOCATION) {
+            Serial.println("Could not store in that location");
+            check = false;
+          } else if (p == FINGERPRINT_FLASHERR) {
+            Serial.println("Error writing to flash");
+            check = false;
+          } else {
+            Serial.println("Unknown error");
+            check = false;
+          }
+          if (check) {
+              digitalWrite(BUZZER_PIN, HIGH);
+              delay(150);
+              digitalWrite(BUZZER_PIN, LOW);
+              u8g2.clearBuffer();
+              u8g2.setFont(u8g2_font_ncenB08_tr);
+              u8g2.setCursor(5, 10);
+              u8g2.print("Add Finger Success");
+              u8g2.sendBuffer();
+              postNewStatusAddStudent("Success");
+              delay(2000);
+              postAddNewStudentSuccess();
+              displayMainScreen();
+              return;
+
+          } else postNewStatusAddStudent("Waiting");
+        } else postNewStatusAddStudent("Waiting");
+      } else postNewStatusAddStudent("Waiting");  
+    } else postNewStatusAddStudent("Waiting");  
+    delay(1000);
+  }
+}
+
+void postAddNewStudentSuccess() {
+  String url = "http://www.nqngoc.id.vn/post_AddNewStudent_Success.php";
+  WiFiClient client;
+  HTTPClient http;
+  http.begin(client, url);
+
+  int httpResponseCode = http.GET();
+
+  http.end();
+}
+
+void postNewStatusAddStudent(String status){
+  String url = "http://www.nqngoc.id.vn/post_NewStatusAddStudent.php";
+  WiFiClient client;
+  HTTPClient http;
+  http.begin(client, url);
+
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  String postData = "status=" + status;
+  int httpResponseCode = http.POST(postData);
+
+  http.end();
+}
 
 void postMarkAbsent() {
   String url = "http://www.nqngoc.id.vn/post_MarkAbsent.php";
@@ -182,20 +406,6 @@ void postMarkAbsent() {
   http.begin(client, url);
 
   int httpResponseCode = http.POST("a");
-
-  http.end();
-}
-
-void postNewStudent(String tagID) {
-  String url = "http://www.nqngoc.id.vn/post_NewStudent.php";
-  WiFiClient client;
-  HTTPClient http;
-  http.begin(client, url);
-
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-
-  String postData = "rfid=" + tagID;
-  int httpResponseCode = http.POST(postData);
 
   http.end();
 }
@@ -230,8 +440,7 @@ void parseStudentInfo(String tagID, String studentInfo) {
   if (doc.containsKey("error")) {
     const char* errorMsg = doc["error"];
     if (strcmp(errorMsg,"Student Not Found") == 0){
-      postNewStudent(tagID);
-      displayStudentInformation("New Student","");
+      
     } else 
     if (strcmp(errorMsg,"No Schedule") == 0){
       digitalWrite(BUZZER_PIN, HIGH);
@@ -240,7 +449,7 @@ void parseStudentInfo(String tagID, String studentInfo) {
       displayStudentInformation("No Schedule","");
     } else 
     if (strcmp(errorMsg,"New Student") == 0){
-      displayStudentInformation("New Student","");
+      displayStudentInformation("No Schedule","");
     }
     return;
   }
